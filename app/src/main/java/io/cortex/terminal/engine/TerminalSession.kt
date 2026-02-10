@@ -35,19 +35,33 @@ class TerminalSession(
     val screenUpdate = _screenUpdate.asStateFlow()
 
     companion object {
+        var isNativeLoaded = false
         init {
             try {
                 System.loadLibrary("terminal-jni")
+                isNativeLoaded = true
             } catch (e: UnsatisfiedLinkError) {
+                Log.e("TerminalSession", "Failed to load terminal-jni library", e)
+            } catch (e: Exception) {
                 Log.e("TerminalSession", "Failed to load terminal-jni library", e)
             }
         }
     }
 
     fun initialize() {
+        if (!isNativeLoaded) {
+            Log.e("TerminalSession", "Native library not loaded, skipping initialization")
+            return
+        }
         if (handle != 0L) return
 
-        handle = createSession(command, initialRows, initialCols)
+        try {
+            handle = createSession(command, initialRows, initialCols)
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e("TerminalSession", "Failed to link native createSession", e)
+            return
+        }
+
         if (handle == 0L) {
             Log.e("TerminalSession", "Failed to create native session")
             return
