@@ -11,6 +11,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <vector>
+#include <mutex>
 
 // Assuming libvterm is available in include path
 // #include "vterm.h"
@@ -25,6 +26,7 @@ struct TerminalHandle {
     pid_t pid;
     VTerm *vt;
     VTermScreen *vts;
+    std::mutex lock;
 };
 
 extern "C" {
@@ -115,6 +117,7 @@ Java_io_cortex_terminal_engine_TerminalSession_resize(JNIEnv *env, jobject thiz,
     ws.ws_ypixel = 0;
     ioctl(handle->pty_fd, TIOCSWINSZ, &ws);
 
+    std::lock_guard<std::mutex> guard(handle->lock);
     vterm_set_size(handle->vt, rows, cols);
     vterm_screen_flush_damage(handle->vts);
 }
@@ -123,7 +126,10 @@ JNIEXPORT void JNICALL
 Java_io_cortex_terminal_engine_TerminalSession_pushBytes(JNIEnv *env, jobject thiz, jlong handlePtr, jbyteArray data, jint length) {
     TerminalHandle *handle = (TerminalHandle *)handlePtr;
     jbyte *bytes = env->GetByteArrayElements(data, NULL);
-    vterm_input_write(handle->vt, (char *)bytes, length);
+    {
+        std::lock_guard<std::mutex> guard(handle->lock);
+        vterm_input_write(handle->vt, (char *)bytes, length);
+    }
     env->ReleaseByteArrayElements(data, bytes, JNI_ABORT);
 }
 
@@ -133,13 +139,18 @@ Java_io_cortex_terminal_engine_TerminalSession_closeSession(JNIEnv *env, jobject
     // fd is owned by Java ParcelFileDescriptor now, so we don't close it here to avoid double close issues.
     // close(handle->pty_fd);
     kill(handle->pid, SIGKILL);
-    vterm_free(handle->vt);
+    {
+        std::lock_guard<std::mutex> guard(handle->lock);
+        vterm_free(handle->vt);
+    }
     delete handle;
 }
 
 JNIEXPORT jstring JNICALL
 Java_io_cortex_terminal_engine_TerminalSession_getLineInternal(JNIEnv *env, jobject thiz, jlong handlePtr, jint row) {
     TerminalHandle *handle = (TerminalHandle *)handlePtr;
+
+    std::lock_guard<std::mutex> guard(handle->lock);
     int rows, cols;
     vterm_get_size(handle->vt, &rows, &cols);
 
